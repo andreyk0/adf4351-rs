@@ -12,6 +12,7 @@ pub mod constants;
 pub mod frequency;
 pub mod register;
 pub mod errors;
+pub mod refin;
 
 use errors::*;
 use register::*;
