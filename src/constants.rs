@@ -12,9 +12,9 @@ pub const PFD_FREQ_FRACN_MAX: u32 = 32_000_000;
 
 /// The prescaler limits the INT value as follows:
 /// Prescaler = 4/5: N MIN = 23
-//// Prescaler = 8/9: N MIN = 75
-//// This frequency is low enough that it covers VCO
-//// range when multiplied by 75
+/// Prescaler = 8/9: N MIN = 75
+/// This frequency is low enough that it covers VCO
+/// range when multiplied by 75
 pub const PFD_FREQ_FRACN_EASY_MAX: u32 = 29_000_000;
 
 /// Max Phase Detector Frequency (Integer-N, band select enabled)

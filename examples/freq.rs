@@ -18,8 +18,7 @@ use crate::hal::{
 
 use embedded_hal::spi::MODE_0;
 
-use adf4351::*;
-use adf4351::register::*;
+use adf4351::{ device::*, register::*, config::* };
 
 
 #[entry]
@@ -55,15 +54,42 @@ fn main() -> ! {
     let xtal = 25_000_000;
 
     let f = 63_000_000;
-    let rs = RegisterSet::newf(xtal, f).unwrap();
+    let rs = RegisterSet::default()
+        // Double buffer register writes
+        .set(DoubleBuffer::Enabled)
+
+        // Charge pump
+        .set(ChargePumpCurrent(0b111))
+
+        // FRAC-N modulus
+        .set(Mod(4000))
+
+        // keep xtal input, clean up duty cycle
+        .set(RefDoubler::Enabled)
+        .set(Rdiv2::Enabled)
+
+        // Pin config
+        .set(LockDetectPin::DigitalLockDetect)
+
+        // RF out
+        .set(BandSelectClockDiv(200))
+        .set(AuxOutputEnable::Enabled)
+        .set(AuxOutputPower(2))
+        .set(RfOutputEnable::Enabled)
+        .set(OutputPower(2))
+        ;
+
+    let rs = FracN::init(rs); // init FracN mode, one time settings
+    let fracn = FracN(Fpfd::new(xtal, &rs).unwrap()); // init with cuffent PFD config
+    let rs = fracn.set_f_out(f, rs).unwrap(); // set output frequency
+
     sg.write_register_set(&mut delay, &rs).unwrap();
 
     let rs_words = rs.to_words();
     hprintln!("RegisterSet: {:?}", rs).unwrap();
-    for (i,w) in rs_words.iter().enumerate() { hprintln!("RS[{}] {:#010x} {:#034b}", 5-i, w, w).unwrap(); };
-    hprintln!("f_pfd {:?}", rs.f_pfd(xtal)).unwrap();
-    hprintln!("target f {:?} <-> f_out {:?}", f, rs.f_out(xtal)).unwrap();
-
+    for (i,w) in rs_words.iter().enumerate() { hprintln!("RS[{}] {:#010x} {:#034b}", i, w, w).unwrap(); };
+    hprintln!("f_pfd {:?}", fracn.0).unwrap();
+    hprintln!("target f {:?} <-> f_out {:?}", f, FracN::f_out_hz(xtal, &rs)).unwrap();
 
     loop {
         led1.set_high().unwrap();

@@ -1,50 +1,193 @@
+use core::marker::PhantomData;
+
 ///! ADF4351 registers
 
-/// When power is first applied to the ADF4351, the part requires
-/// six writes (one each to R5, R4, R3, R2, R1, and R0) for the output
-/// to become active.
-#[derive(Debug,Copy,Clone)]
-pub struct RegisterSet {
-    pub r0: Reg0,
-    pub r1: Reg1,
-    pub r2: Reg2,
-    pub r3: Reg3,
-    pub r4: Reg4,
-    pub r5: Reg5,
+/// Register number marker types
+macro_rules! gen_register_marker {
+    ($r:ident, $n:tt) => {
+        /// Register $r maker
+        #[derive(Debug,Copy,Clone)]
+        pub struct $r {}
+
+        impl Default for Reg<$r> { #[inline] fn default() -> Self { Reg { w: $n, phantom: PhantomData::default() } } }
+    }
 }
 
-impl RegisterSet {
-    /// Register values in device format.
-    /// This is the order in which they should be sent to device.
-    pub fn to_words(self: &Self) -> [u32; 6] {
-        let pr = self.r1.prescaler;
-        [ self.r5.to_word(pr),
-          self.r4.to_word(pr),
-          self.r3.to_word(pr),
-          self.r2.to_word(pr),
-          self.r1.to_word(pr),
-          self.r0.to_word(pr),
-        ]
+gen_register_marker!(R0, 0);
+gen_register_marker!(R1, 1);
+gen_register_marker!(R2, 2);
+gen_register_marker!(R3, 3);
+gen_register_marker!(R4, 4);
+gen_register_marker!(R5, 5);
+
+
+/// Single config register
+#[derive(Debug,Copy,Clone)]
+pub struct Reg<R> {
+    /// Config register word
+    pub w: u32,
+    phantom: PhantomData<R>,
+}
+
+/// Bit operations on 32bit words
+impl<R> Reg<R> {
+    #[inline]
+    pub fn get<F>(self: &Self) -> F
+    where F: Sized + BitField<R> + From<u32>
+    {
+        F::from(
+            (self.w >> F::offset()) & F::mask()
+        )
+    }
+
+    #[inline]
+    pub fn set<F>(mut self: Self, f: F) -> Self
+    where F: Sized + BitField<R> + Into<u32>
+    {
+        let fbits = (f.into() & F::mask()) << F::offset();
+        let rbits = self.w & (! ( F::mask() << F::offset() ));
+        self.w = rbits | fbits;
+        self
     }
 }
 
 
-/// Register conversion to u32, to be sent over SPI
-pub trait Reg {
-    fn to_word(self: &Self, pr1: Pr1Prescaler) -> u32;
+
+/// Full set of config registers.
+/// Defaults to all config bits set to 0.
+///
+/// When power is first applied to the ADF4351, the part requires
+/// six writes (one each to R5, R4, R3, R2, R1, and R0) for the output
+/// to become active.
+#[derive(Debug,Copy,Clone,Default)]
+pub struct RegisterSet {
+    pub r0: Reg<R0>,
+    pub r1: Reg<R1>,
+    pub r2: Reg<R2>,
+    pub r3: Reg<R3>,
+    pub r4: Reg<R4>,
+    pub r5: Reg<R5>,
 }
 
-/// Register 0
-#[derive(Debug,Copy,Clone)]
-pub struct Reg0 {
+/// Type-indexed register access
+pub trait RIdx<R> {
+    fn r(self: Self) -> Reg<R>;
+    fn update_r<F>(self: Self, f: F) -> Self where F: FnOnce(Reg<R>) -> Reg<R>;
+}
+
+macro_rules! gen_register_index {
+    ($r:ident, $f:tt) => {
+        impl RIdx<$r> for RegisterSet {
+            #[inline]
+            fn r(self: Self) -> Reg<$r> { self.$f}
+            #[inline]
+            fn update_r<F>(mut self: Self, f: F) -> Self where F: FnOnce(Reg<$r>) -> Reg<$r> {
+                self.$f = f(self.$f);
+                self
+            }
+        }
+    }
+}
+
+gen_register_index!(R0, r0);
+gen_register_index!(R1, r1);
+gen_register_index!(R2, r2);
+gen_register_index!(R3, r3);
+gen_register_index!(R4, r4);
+gen_register_index!(R5, r5);
+
+
+impl RegisterSet {
+
+    /// Register values in device format.
+    #[inline]
+    pub fn to_words(self: &Self) -> &[u32; 6] {
+        unsafe{ core::mem::transmute::<&RegisterSet, &[u32;6]>(&self) }
+    }
+
+    /// Get register bitfield value
+    #[inline]
+    pub fn get<F,R>(self: &Self) -> F
+    where F: Sized + BitField<R> + From<u32>,
+          Self: RIdx<R>
+    {
+        F::from(
+            (self.r().w >> F::offset()) & F::mask()
+        )
+    }
+
+    /// Update register bitfield
+    #[inline]
+    pub fn set<F,R>(self: Self, f: F) -> Self
+    where F: Sized + BitField<R> + Into<u32>,
+          Self: RIdx<R>
+    {
+        self.update_r(|r| r.set(f))
+    }
+}
+
+
+
+/// Bit operations on 32bit words
+pub trait BitField<R> {
+    /// Number of bits in the bit field
+    fn num_bits() -> u8;
+
+    /// Offset from 0
+    fn offset() -> u8;
+
+    #[inline]
+    fn mask() -> u32 {
+        !(0xFFFFFFFFu32 << Self::num_bits())
+    }
+}
+
+/// Generate BitField implementation
+macro_rules! gen_bitfield_impl {
+	($r:ty, $n:ident, $nb:tt, $off:tt) => {
+        impl BitField<$r> for $n {
+            #[inline] fn num_bits() -> u8 { $nb }
+            #[inline] fn offset() -> u8 { $off }
+        }
+    }
+}
+
+/// Small bitfield-encoded numbes boilerplate
+macro_rules! gen_bitfield_struct {
+	($(#[$meta:meta])*, $r:ty, $n:ident, $v:ty, $nb:tt, $off:tt) => {
+        $(#[$meta])*
+        #[derive(Debug,Copy,Clone)]
+        pub struct $n(pub $v);
+
+        gen_bitfield_impl!($r, $n, $nb, $off);
+
+        impl From<u32> for $n { #[inline] fn from(x: u32) -> Self { $n(x as $v) } }
+        impl Into<u32> for $n { #[inline] fn into(self) -> u32 { self.0 as u32 } }
+	};
+}
+
+macro_rules! gen_bitfield_enum {
+	($r:ty, $n:ident, $nb:tt, $off:tt) => {
+        gen_bitfield_impl!($r, $n, $nb, $off);
+
+        impl From<u32> for $n { #[inline] fn from(x: u32) -> Self { x.into() } }
+        impl Into<u32> for $n { #[inline] fn into(self) -> u32 { self as u32 } }
+    }
+}
+
+
+gen_bitfield_struct!(
     /// The 16 INT bits (Bits[DB30:DB15]) set the INT value, which
     /// determines the integer part of the feedback division factor. The
     /// INT value is used in Equation 1 (see the INT, FRAC, MOD, and
     /// R Counter Relationship section). Integer values from 23 to
     /// 65,535 are allowed for the 4/5 prescaler; for the 8/9 prescaler,
     /// the minimum integer value is 75.
-    pub int: u16,
+    , R0, Int, u16, 16, 15
+);
 
+
+gen_bitfield_struct!(
     ///  The 12 FRAC bits (Bits[DB14:DB3]) set the numerator of the
     ///  fraction that is input to the Σ-Δ modulator. This fraction, along
     ///  with the INT value, specifies the new frequency channel that
@@ -52,20 +195,8 @@ pub struct Reg0 {
     ///  Worked Example section. FRAC values from 0 to (MOD − 1)
     ///  cover channels over a frequency range equal to the PFD refer-
     ///  ence frequency.
-    pub frac: u16, // lower 12 bits are used
-}
-
-impl Reg for Reg0 {
-    fn to_word(self: &Self, pr1: Pr1Prescaler) -> u32 {
-        let intmin = match pr1 {
-            Pr1Prescaler::Pr45 => 23,
-            Pr1Prescaler::Pr89 => 75,
-
-        };
-        (self.int.max(intmin) as u32) << 15 |
-        ((self.frac & 0xFFF) as u32) << 3
-    }
-}
+    , R0, Frac, u16, 12, 3
+);
 
 
 /// The phase adjust bit (Bit DB28) enables adjustment of the output
@@ -83,6 +214,10 @@ pub enum Ph1PhaseAdj {
     Off,
     On,
 }
+gen_bitfield_enum!(R1, Ph1PhaseAdj, 1, 28);
+
+
+
 
 /// The dual-modulus prescaler (P/P + 1), along with the INT,
 /// FRAC, and MOD values, determines the overall division
@@ -101,41 +236,30 @@ pub enum Pr1Prescaler {
     /// Prescaler = 8/9: INT N MIN = 75
     Pr89,
 }
+gen_bitfield_enum!(R1, Pr1Prescaler, 1, 27);
 
-/// Register 1
-#[derive(Debug,Copy,Clone)]
-pub struct Reg1 {
-    /// Phase Adjust
-    pub phase_adj: Ph1PhaseAdj,
 
-    ///  Prescaler Value
-    pub prescaler: Pr1Prescaler,
-
+gen_bitfield_struct!(
     /// 12-Bit Phase Value
     /// Bits[DB26:DB15] control the phase word. The phase word must
     /// be less than the MOD value programmed in Register 1. The phase
     /// word is used to program the RF output phase from 0° to 360°
     /// with a resolution of 360°/MOD (see the Phase Resync section).
-    pub phase: u16,
+    , R1, Phase, u16, 12, 15
+);
 
+
+gen_bitfield_struct!(
     /// 12-Bit Modulus Value (MOD)
     /// The 12 MOD bits (Bits[DB14:DB3]) set the fractional modulus.
     /// The fractional modulus is the ratio of the PFD frequency to the
     /// channel step resolution on the RF output. For more information,
     /// see the 12-Bit Programmable Modulus section.
-    pub modulus: u16,
+    , R1, Mod, u16, 12, 3
+);
 
-}
 
-impl Reg for Reg1 {
-    fn to_word(self: &Self, _pr1: Pr1Prescaler) -> u32 {
-        (self.phase_adj as u32) << 28 |
-        (self.prescaler  as u32) << 27 |
-        ((self.phase as u32) & 0xFFF) << 15 |
-        (((self.modulus & 0xFFF).max(2) as u32) & 0xFFF) << 3 |
-        0b001
-    }
-}
+
 
 /// The noise mode on the ADF4351 is controlled by setting
 /// Bits[DB30:DB29] in Register 2 (see Figure 26). The noise mode
@@ -163,6 +287,8 @@ pub enum NoiseMode {
     LowNoise,
     LowSpur = 0b11,
 }
+gen_bitfield_enum!(R2, NoiseMode, 2, 29);
+
 
 /// The on-chip multiplexer is controlled by Bits[DB28:DB26]
 /// (see Figure 26). Note that N counter output must be disabled
@@ -177,6 +303,8 @@ pub enum Muxout {
     Alock,
     Dlock,
 }
+gen_bitfield_enum!(R2, Muxout, 3, 26);
+
 
 /// Setting the DB25 bit to 0 disables the doubler and feeds the REF IN
 /// signal directly into the 10-bit R counter. Setting this bit to 1 multi-
@@ -198,6 +326,8 @@ pub enum RefDoubler {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R2, RefDoubler, 1, 25);
+
 
 /// Setting the DB24 bit to 1 inserts a divide-by-2 toggle flip-flop
 /// between the R counter and the PFD, which extends the maximum
@@ -208,6 +338,14 @@ pub enum Rdiv2 {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R2, Rdiv2, 1, 24);
+
+gen_bitfield_struct!(
+    /// The 10-bit R counter (Bits[DB23:DB14]) allows the input reference
+    /// frequency (REF IN ) to be divided down to produce the reference
+    /// clock to the PFD. Division ratios from 1 to 1023 are allowed.
+    , R2, R, u16, 10, 14
+);
 
 /// The DB13 bit enables or disables double buffering of
 /// Bits[DB22:DB20] in Register 4. For information about how
@@ -217,6 +355,17 @@ pub enum DoubleBuffer {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R2, DoubleBuffer, 1, 13);
+
+
+gen_bitfield_struct!(
+    /// Charge Pump Current Setting
+    /// Bits[DB12:DB9] set the charge pump current. This value should
+    /// be set to the charge pump current that the loop filter is designed
+    /// with (see Figure 26).
+    , R2, ChargePumpCurrent, u8, 4, 9
+);
+
 
 /// The DB8 bit configures the lock detect function (LDF). The LDF
 /// controls the number of PFD cycles monitored by the lock detect
@@ -230,6 +379,8 @@ pub enum Ldf {
     FracN,
     IntN,
 }
+gen_bitfield_enum!(R2, Ldf, 1, 8);
+
 
 /// The lock detect precision bit (Bit DB7) sets the comparison
 /// window in the lock detect circuit. When DB7 is set to 0, the
@@ -247,6 +398,7 @@ pub enum Ldp {
     Ldp10ns,
     Ldp6ns,
 }
+gen_bitfield_enum!(R2, Ldp, 1, 7);
 
 
 /// The DB6 bit sets the phase detector polarity. When a passive
@@ -254,10 +406,12 @@ pub enum Ldp {
 /// should be set to 1. If an active filter with an inverting charac-
 /// teristic is used, this bit should be set to 0.
 #[derive(Debug,Copy,Clone)]
-pub enum PdPolarity {
+pub enum PhaseDetectorPolarity {
     Negative,
     Positive,
 }
+gen_bitfield_enum!(R2, PhaseDetectorPolarity, 1, 6);
+
 
 /// The DB5 bit provides the programmable power-down mode.
 /// Setting this bit to 1 performs a power-down. Setting this bit to 0
@@ -277,6 +431,8 @@ pub enum PowerDown {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R2, PowerDown, 1, 5);
+
 
 /// Setting the DB4 bit to 1 puts the charge pump into three-state
 /// mode. This bit should be set to 0 for normal operation.
@@ -285,6 +441,8 @@ pub enum ChargePumpThreeState {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R2, ChargePumpThreeState, 1, 4);
+
 
 /// The DB3 bit is the reset bit for the R counter and the N counter
 /// of the ADF4351. When this bit is set to 1, the RF synthesizer
@@ -295,73 +453,10 @@ pub enum CounterReset {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R2, CounterReset, 1, 3);
 
-/// Register 2
-#[derive(Debug,Copy,Clone)]
-pub struct Reg2 {
-    /// Low Noise and Low Spur Modes
-    pub noise_mode: NoiseMode,
 
-    /// MUXOUT
-    pub muxout: Muxout,
 
-    /// Reference Doubler
-    pub ref_doubler: RefDoubler,
-
-    /// RDIV2
-    pub rdiv2: Rdiv2,
-
-    /// The 10-bit R counter (Bits[DB23:DB14]) allows the input reference
-    /// frequency (REF IN ) to be divided down to produce the reference
-    /// clock to the PFD. Division ratios from 1 to 1023 are allowed.
-    pub r_counter: u16, // 10bit
-
-    /// Double Buffer
-    pub double_buffer: DoubleBuffer,
-
-    /// Charge Pump Current Setting
-    /// Bits[DB12:DB9] set the charge pump current. This value should
-    /// be set to the charge pump current that the loop filter is designed
-    /// with (see Figure 26).
-    pub cp_current: u8, // 4bit
-
-    /// Lock Detect Function (LDF)
-    pub ldf: Ldf,
-
-    /// Lock Detect Precision (LDP)
-    pub ldp: Ldp,
-
-    /// Phase Detector Polarity
-    pub pd_polarity: PdPolarity,
-
-    /// Power-Down (PD)
-    pub power_down: PowerDown,
-
-    /// Charge Pump Three-State
-    pub charge_pump: ChargePumpThreeState,
-
-    /// Counter Reset
-    pub counter_reset: CounterReset,
-}
-
-impl Reg for Reg2 {
-    fn to_word(self: &Self, _pr1: Pr1Prescaler) -> u32 {
-        (self.noise_mode as u32) << 29 |
-        (self.muxout as u32) << 26 |
-        (self.ref_doubler as u32) << 25 |
-        (self.rdiv2 as u32) << 24 |
-        (self.r_counter.max(1).min(1023) as u32) << 14 |
-        (self.double_buffer as u32) << 13 |
-        ((self.cp_current & 0x0F) as u32) << 9 |
-        (self.ldf as u32) << 8 |
-        (self.ldp as u32) << 7 |
-        (self.pd_polarity as u32) << 6 |
-        (self.power_down as u32) << 5 |
-        (self.charge_pump as u32) << 4 |
-        (self.counter_reset as u32) << 3 |
-        0b010
-    }
-}
 
 /// Setting the DB23 bit to 1 selects a faster logic sequence of band
 /// selection, which is suitable for high PFD frequencies and is
@@ -374,6 +469,8 @@ pub enum BandSelectClockMode {
     Low,
     High,
 }
+gen_bitfield_enum!(R3, BandSelectClockMode, 1, 23);
+
 
 /// Bit DB22 sets the PFD antibacklash pulse width. When Bit DB22
 /// is set to 0, the PFD antibacklash pulse width is 6 ns. This setting is
@@ -386,6 +483,8 @@ pub enum AntiBacklashPulseWidth {
     AB6ns, // FRAC-N
     AB3ns, // INT-N
 }
+gen_bitfield_enum!(R3, AntiBacklashPulseWidth, 1, 22);
+
 
 /// Setting the DB21 bit to 1 enables charge pump charge cancel-
 /// ation. This has the effect of reducing PFD spurs in integer-N
@@ -395,6 +494,7 @@ pub enum ChargeCancellation {
     Disabled, // FRAC-N
     Enabled, // INT-N
 }
+gen_bitfield_enum!(R3, ChargeCancellation, 1, 21);
 
 
 /// Setting the DB18 bit to 1 enables cycle slip reduction. CSR is
@@ -408,6 +508,8 @@ pub enum CycleSlipReduction {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R3, CycleSlipReduction, 1, 18);
+
 
 /// Bits[DB16:DB15] must be set to 10 to activate phase resync
 /// (see the Phase Resync section). These bits must be set to 01
@@ -420,46 +522,20 @@ pub enum ClockDividerMode {
     FastLock,
     Resync,
 }
+gen_bitfield_enum!(R3, ClockDividerMode, 2, 15);
 
 
-/// Register 3
-#[derive(Debug,Copy,Clone)]
-pub struct Reg3 {
-    /// Band Select Clock Mode
-    pub band_select_clock_mode: BandSelectClockMode,
-
-    /// Antibacklash Pulse Width (ABP)
-    pub anti_backlash_pulse_width: AntiBacklashPulseWidth,
-
-    /// Charge Cancelation
-    pub charge_cancellation: ChargeCancellation,
-
-    /// CSR Enable
-    pub csr: CycleSlipReduction,
-
-    /// Clock Divider Mode
-    pub clock_divider_mode: ClockDividerMode,
-
+gen_bitfield_struct!(
     /// 12-Bit Clock Divider Value
     /// Bits[DB14:DB3] set the 12-bit clock divider value. This value
     /// is the timeout counter for activation of phase resync (see the
     /// Phase Resync section). The clock divider value also sets the
     /// timeout counter for fast lock (see the Fast Lock Timer and
     /// Register Sequences section).
-    pub clock_divider: u16, // 12bit
-}
+    , R3, ClockDividerValue, u16, 12, 3
+);
 
-impl Reg for Reg3 {
-    fn to_word(self: &Self, _pr1: Pr1Prescaler) -> u32 {
-        (self.band_select_clock_mode as u32) << 23 |
-        (self.anti_backlash_pulse_width as u32) << 22 |
-        (self.charge_cancellation as u32) << 21 |
-        (self.csr as u32) << 18 |
-        (self.clock_divider_mode as u32) << 15 |
-        ((self.clock_divider & 0xFFF) as u32) << 3 |
-        0b011
-    }
-}
+
 
 /// The DB23 bit selects the feedback from the VCO output to the
 /// N counter. When this bit is set to 1, the signal is taken directly
@@ -475,6 +551,27 @@ pub enum FeedbackSelect {
     Divided,
     Fundamental,
 }
+gen_bitfield_enum!(R4, FeedbackSelect, 1, 23);
+
+
+gen_bitfield_struct!(
+    /// RF Divider Select
+    /// Bits[DB22:DB20] select the value of the RF output divider (see
+    /// Figure 28).
+    , R4, RfDividerSelect, u8, 3, 20
+);
+
+
+gen_bitfield_struct!(
+    /// Band Select Clock Divider Value
+    /// Bits[DB19:DB12] set a divider for the band select logic clock input.
+    /// By default, the output of the R counter is the value used to clock
+    /// the band select logic, but, if this value is too high (>125 kHz), a
+    /// divider can be switched on to divide the R counter output to a
+    /// smaller value (see Figure 28).
+    , R4, BandSelectClockDiv, u8, 8, 12
+);
+
 
 /// Setting the DB11 bit to 0 powers the VCO up; setting this bit to 1
 /// powers the VCO down.
@@ -483,6 +580,8 @@ pub enum VcoPowerDown {
     PoweredUp,
     PoweredDown,
 }
+gen_bitfield_enum!(R4, VcoPowerDown, 1, 11);
+
 
 /// When the DB10 bit is set to 1, the supply current to the RF output
 /// stage is shut down until the part achieves lock, as measured by
@@ -492,6 +591,8 @@ pub enum MuteTillLockDetect {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R4, MuteTillLockDetect, 1, 10);
+
 
 /// The DB9 bit sets the auxiliary RF output. If DB9 is set to 0, the
 /// auxiliary RF output is the output of the RF dividers; if DB9 is set
@@ -501,6 +602,8 @@ pub enum AuxOutputSelect {
     Divided,
     Fundamental,
 }
+gen_bitfield_enum!(R4, AuxOutputSelect, 1, 9);
+
 
 /// The DB8 bit enables or disables the auxiliary RF output. If DB8
 /// is set to 0, the auxiliary RF output is disabled; if DB8 is set to 1,
@@ -510,6 +613,15 @@ pub enum AuxOutputEnable {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R4, AuxOutputEnable, 1, 8);
+
+gen_bitfield_struct!(
+    /// AUX Output Power
+    /// Bits[DB7:DB6] set the value of the auxiliary RF output power
+    /// level (see Figure 28).
+    , R4, AuxOutputPower, u8, 2, 6
+);
+
 
 /// The DB5 bit enables or disables the primary RF output. If DB5
 /// is set to 0, the primary RF output is disabled; if DB5 is set to 1,
@@ -519,67 +631,16 @@ pub enum RfOutputEnable {
     Disabled,
     Enabled,
 }
+gen_bitfield_enum!(R4, RfOutputEnable, 1, 5);
 
-/// Register 4
-#[derive(Debug,Copy,Clone)]
-pub struct Reg4 {
-    /// Feedback Select
-    pub feedback_select: FeedbackSelect,
 
-    /// RF Divider Select
-    /// Bits[DB22:DB20] select the value of the RF output divider (see
-    /// Figure 28).
-    pub rf_divider_select: u8, // 3bits
-
-    /// Band Select Clock Divider Value
-    /// Bits[DB19:DB12] set a divider for the band select logic clock input.
-    /// By default, the output of the R counter is the value used to clock
-    /// the band select logic, but, if this value is too high (>125 kHz), a
-    /// divider can be switched on to divide the R counter output to a
-    /// smaller value (see Figure 28).
-    pub band_select_clock_div: u8,
-
-    /// VCO Power-Down
-    pub vco_power_down: VcoPowerDown,
-
-    /// Mute Till Lock Detect (MTLD)
-    pub mute_till_lock_detect: MuteTillLockDetect,
-
-    /// AUX Output Select
-    pub aux_output_select: AuxOutputSelect,
-
-    /// AUX Output Enable
-    pub aux_output_enable: AuxOutputEnable,
-
-    /// AUX Output Power
-    /// Bits[DB7:DB6] set the value of the auxiliary RF output power
-    /// level (see Figure 28).
-    pub aux_output_power: u8, // 2bits
-
-    /// RF Output Enable
-    pub rf_output_enable: RfOutputEnable,
-
+gen_bitfield_struct!(
     /// Output Power
     /// Bits[DB4:DB3] set the value of the primary RF output power
     /// level (see Figure 28).
-    pub output_power: u8, // 2bits
-}
+    , R4, OutputPower, u8, 2, 3
+);
 
-impl Reg for Reg4 {
-    fn to_word(self: &Self, _pr1: Pr1Prescaler) -> u32 {
-        (self.feedback_select as u32) << 23 |
-        ((self.rf_divider_select & 0b111).min(6) as u32) << 20 |
-        (self.band_select_clock_div.max(1) as u32) << 12 |
-        (self.vco_power_down as u32) << 11 |
-        (self.mute_till_lock_detect as u32) << 10 |
-        (self.aux_output_select as u32) << 9 |
-        (self.aux_output_enable as u32) << 8 |
-        ((self.aux_output_power & 0b11) as u32) << 6 |
-        (self.rf_output_enable as u32) << 5 |
-        ((self.output_power & 0b11) as u32) << 3 |
-        0b100
-    }
-}
 
 /// Bits[DB23:DB22] set the operation of the lock detect (LD) pin
 /// (see Figure 29).
@@ -590,16 +651,4 @@ pub enum LockDetectPin {
     Low1,
     High,
 }
-
-/// Register 5
-#[derive(Debug,Copy,Clone)]
-pub struct Reg5 {
-    /// Lock Detect Pin Operation
-    pub lock_detect_pin: LockDetectPin,
-}
-impl Reg for Reg5 {
-    fn to_word(self: &Self, _pr1: Pr1Prescaler) -> u32 {
-        (self.lock_detect_pin as u32) << 22 |
-        0b101
-    }
-}
+gen_bitfield_enum!(R5, LockDetectPin, 2, 22);
