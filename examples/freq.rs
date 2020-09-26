@@ -61,10 +61,14 @@ fn main() -> ! {
         // Charge pump
         .set(ChargePumpCurrent(0b111))
 
+        // Phase
+        .set(PhaseDetectorPolarity::Positive)
+
         // FRAC-N modulus
         .set(Mod(4000))
 
         // keep xtal input, clean up duty cycle
+        .set(R(1))
         .set(RefDoubler::Enabled)
         .set(Rdiv2::Enabled)
 
@@ -86,10 +90,16 @@ fn main() -> ! {
     sg.write_register_set(&mut delay, &rs).unwrap();
 
     let rs_words = rs.to_words();
-    hprintln!("RegisterSet: {:?}", rs).unwrap();
-    for (i,w) in rs_words.iter().enumerate() { hprintln!("RS[{}] {:#010x} {:#034b}", i, w, w).unwrap(); };
-    hprintln!("f_pfd {:?}", fracn.0).unwrap();
-    hprintln!("target f {:?} <-> f_out {:?}", f, FracN::f_out_hz(xtal, &rs)).unwrap();
+    for (i,w) in rs_words.iter().enumerate() {
+        hprintln!("RS[{}] {:#010x} {:#034b}", i, w, w).unwrap();
+    };
+
+    let int : Int = rs.get();
+    let frac : Frac = rs.get();
+    let modulus : Mod = rs.get();
+    let rfdiv : RfDividerSelect = rs.get();
+    hprintln!("{:?} {:?} {:?} {:?}", int, frac, modulus, rfdiv).unwrap();
+    hprintln!("{:?} => f {:?} <-> f_out {:?}", fracn.0, f, FracN::f_out_hz(xtal, &rs)).unwrap();
 
     loop {
         led1.set_high().unwrap();
