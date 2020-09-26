@@ -20,7 +20,10 @@ use embedded_hal::spi::MODE_0;
 
 use adf4351::{ device::*, register::*, config::* };
 
-
+/// Example board config / test frequency generator.
+/// Example boards:
+/// [STM32F407VET6](https://www.amazon.com/HiLetgo-STM32F407VET6-Cortex-M4-Development-NRF2410/dp/B071KBZR58/ref=sxts_sxwds-bia-wc-drs-ajax1_0?cv_ct_cx=stm32f4&dchild=1&keywords=stm32f4&pd_rd_i=B071KBZR58&pd_rd_r=55e7d3f3-cdc8-4579-86db-7ca754be35b7&pd_rd_w=A8TgI&pd_rd_wg=J3B78&pf_rd_p=037ca9fd-790e-4a16-836b-14da89aed20e&pf_rd_r=1R23WCQBWJCYQN1MXC0G&psc=1&qid=1601162000&sr=1-1-25b07e09-600a-4f0d-816e-b06387f8bcf1)
+/// [ADF4351](https://www.amazon.com/35M-4-4GHz-Frequency-Synthesizer-Development-Generator/dp/B078NRD8V6/ref=sr_1_3?dchild=1&keywords=adf4351&qid=1601162186&sr=8-3)
 #[entry]
 fn main() -> ! {
     let dp = stm32::Peripherals::take().unwrap();
@@ -58,16 +61,14 @@ fn main() -> ! {
         // Double buffer register writes
         .set(DoubleBuffer::Enabled)
 
-        // Charge pump
-        .set(ChargePumpCurrent(0b111))
-
-        // Phase
-        .set(PhaseDetectorPolarity::Positive)
-
         // FRAC-N modulus
         .set(Mod(4000))
 
-        // keep xtal input, clean up duty cycle
+        // Board config
+        .set(ChargePumpCurrent(0b111))
+        .set(PhaseDetectorPolarity::Positive)
+
+        // Keep xtal input, clean up duty cycle
         .set(R(1))
         .set(RefDoubler::Enabled)
         .set(Rdiv2::Enabled)
