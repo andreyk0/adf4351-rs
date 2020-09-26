@@ -1,10 +1,10 @@
 # adf4351-rs
 
-Embedded HAL driver for (ADF4351)[https://www.analog.com/en/products/adf4351.html].
+Embedded HAL driver for [ADF4351](https://www.analog.com/en/products/adf4351.html).
 
 Status: experimental. If you have any interest please play with it and submit PRs.
 
-Basic (example)[examples/freq.rs].
+Basic [example](examples/freq.rs).
 
 
 ## Links
