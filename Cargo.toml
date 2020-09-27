@@ -3,7 +3,21 @@ name = "adf4351"
 version = "0.1.0"
 authors = ["Andrey Kartashov <andrey.kartashov@gmail.com>"]
 edition = "2018"
-
+repository = "https://github.com/andreyk0/adf4351-rs"
+license = "MIT OR Apache-2.0"
+description = "Analog Devices ADF4351 HAL driver"
+readme = "README.md"
+keywords = ["frequency", "generator", "embedded", "hal", "adf4351", "embedded-hal-driver"]
+categories = ["embedded", "hardware-support", "no-std"]
+homepage = "https://github.com/andreyk0/adf4351-rs"
+documentation = "https://docs.rs/adf4351"
+include = [
+    "/**/*.rs",
+    "/Cargo.toml",
+    "/README.md",
+    "/LICENSE-MIT",
+    "/LICENSE-APACHE",
+]
 
 [dependencies]
 embedded-hal = "0.2.4"
