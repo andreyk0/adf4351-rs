@@ -20,7 +20,7 @@ impl Fpfd {
         ref_in_hz: u32,
         rs: &RegisterSet,
     ) -> Result<Self,Error> {
-        (if !(REF_IN_FREQ_MIN .. REF_IN_FREQ_MAX).contains(&ref_in_hz) { Err(Error::InvalidReferenceFrequency) } else { Ok(())} )?;
+        (if !(REF_IN_FREQ_MIN .. REF_IN_FREQ_MAX+1).contains(&ref_in_hz) { Err(Error::InvalidReferenceFrequency) } else { Ok(())} )?;
 
         let doubler : RefDoubler = rs.get();
         let divider : Rdiv2 = rs.get();
@@ -59,7 +59,7 @@ impl FracN {
         f_out_hz: u64,
         rs: RegisterSet
     ) -> Result<RegisterSet, Error> {
-        (if !(OUT_FREQ_MIN .. OUT_FREQ_MAX).contains(&f_out_hz) { Err(Error::InvalidOutputFrequency) } else { Ok(())} ) ?;
+        (if !(OUT_FREQ_MIN .. OUT_FREQ_MAX+1).contains(&f_out_hz) { Err(Error::InvalidOutputFrequency) } else { Ok(())} ) ?;
 
         let prescaler : Pr1Prescaler  =
             if f_out_hz > OUT_FREQ_P45_MAX {

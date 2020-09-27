@@ -18,7 +18,7 @@ use crate::hal::{
 
 use embedded_hal::spi::MODE_0;
 
-use adf4351::{ device::*, register::*, config::* };
+use adf4351::{ device::*, register::*, config::*, constants::*, };
 
 /// Example board config / test frequency generator.
 /// Example boards:
@@ -56,7 +56,6 @@ fn main() -> ! {
     sg.enable().unwrap();
     let xtal = 25_000_000;
 
-    let f = 63_000_000;
     let rs = RegisterSet::default()
         // Double buffer register writes
         .set(DoubleBuffer::Enabled)
@@ -84,9 +83,10 @@ fn main() -> ! {
         .set(OutputPower(2))
         ;
 
+    let f_out = 63_000_000;
     let rs = FracN::init(rs); // init FracN mode, one time settings
     let fracn = FracN(Fpfd::new(xtal, &rs).unwrap()); // init with cuffent PFD config
-    let rs = fracn.set_f_out(f, rs).unwrap(); // set output frequency
+    let rs = fracn.set_f_out(f_out, rs).unwrap(); // set output frequency
 
     sg.write_register_set(&mut delay, &rs).unwrap();
 
@@ -100,7 +100,22 @@ fn main() -> ! {
     let modulus : Mod = rs.get();
     let rfdiv : RfDividerSelect = rs.get();
     hprintln!("{:?} {:?} {:?} {:?}", int, frac, modulus, rfdiv).unwrap();
-    hprintln!("{:?} => f {:?} <-> f_out {:?}", fracn.0, f, FracN::f_out_hz(xtal, &rs)).unwrap();
+    hprintln!("{:?} => f set {:?} <-> f actual {:?}", fracn.0, f_out, FracN::f_out_hz(xtal, &rs)).unwrap();
+
+    delay.delay_ms(10000_u32);
+
+    // Try different frequencies
+    let mut step = OUT_FREQ_MAX - OUT_FREQ_MIN;
+    while step > 0 {
+        step = step/2;
+
+        for f_out in (OUT_FREQ_MIN .. OUT_FREQ_MAX+1).step_by(step as usize) {
+            let rs = fracn.set_f_out(f_out, rs).unwrap(); // set output frequency
+            sg.write_register_set(&mut delay, &rs).unwrap();
+            hprintln!("[{:012}] {:?} => f set {:012} <-> f actual {:012}", step, fracn.0, f_out, FracN::f_out_hz(xtal, &rs).unwrap()).unwrap();
+            delay.delay_ms(1000_u32);
+        }
+    }
 
     loop {
         led1.set_high().unwrap();
