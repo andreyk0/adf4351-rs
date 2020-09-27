@@ -1,4 +1,4 @@
-///! Device pins
+//! Device pins
 
 use embedded_hal:: {
     digital::v2::OutputPin,

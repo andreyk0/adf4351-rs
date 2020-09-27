@@ -1,6 +1,6 @@
-use core::marker::PhantomData;
+//! ADF4351 registers
 
-///! ADF4351 registers
+use core::marker::PhantomData;
 
 /// Register number marker types
 macro_rules! gen_register_marker {

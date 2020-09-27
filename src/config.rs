@@ -1,4 +1,4 @@
-///! Device configuration / frequency calculations
+//! Device configuration / frequency calculations
 
 use crate::{ constants::*, errors::*,register::*};
 

@@ -1,5 +1,4 @@
-///! Constants
-
+//! Constants
 
 /// Minimum allowed REFin frequency
 pub const REF_IN_FREQ_MIN: u32 = 10_000_000;
